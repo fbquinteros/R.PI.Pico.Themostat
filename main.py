@@ -164,7 +164,8 @@ def setup_access_point():
     print(f"Then update config.py with your WiFi credentials")
     print(f"{'='*50}\n")
 
-    ap.config(essid=unique_ssid, password=AP_PASSWORD, channel=AP_CHANNEL)
+    # Configure AP - MicroPython uses positional args or specific param names
+    ap.config(ssid=unique_ssid, password=AP_PASSWORD, channel=AP_CHANNEL)
     ap.config(authmode=AP_AUTH_MODE)
 
     # Wait for clients to connect
@@ -474,8 +475,8 @@ def main():
         print("WiFi connection failed. Starting Access Point mode...")
         print("=" * 50)
 
-        # Setup AP interface
-        ap = setup_access_point()
+        # Use the AP interface already created by connect_to_wifi_or_ap()
+        ap = wlan
 
         # Start HTTP server to receive WiFi configuration
         print("\nHTTP server started for WiFi configuration")
