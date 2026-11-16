@@ -273,7 +273,8 @@ def apply_update():
 
 
 def start_http_server(ap_interface):
-    """Start HTTP server on AP interface for WiFi configuration"""
+    """Start HTTP server on AP interface for WiFi configuration.
+    Returns True if new credentials were received and saved, False otherwise."""
     try:
         # Get AP IP address (typically 192.168.4.1)
         ap_ip = ap_interface.ifconfig()[0]
@@ -292,18 +293,24 @@ def start_http_server(ap_interface):
             try:
                 client_sock, client_addr = sock.accept()
                 print(f"Client connected from {client_addr}")
-                handle_client_request(client_sock)
+                credentials_received = handle_client_request(client_sock)
                 client_sock.close()
+
+                if credentials_received:
+                    return True  # Exit loop to signal new credentials available
+
             except Exception as e:
                 print(f"Error handling client: {e}")
                 continue
 
     except Exception as e:
         print(f"HTTP server error: {e}")
+    return False
 
 
 def handle_client_request(client_sock):
-    """Handle incoming HTTP request for WiFi configuration"""
+    """Handle incoming HTTP request for WiFi configuration.
+    Returns True if new credentials were saved, False otherwise."""
     try:
         # Read the request
         request_data = b""
@@ -316,7 +323,7 @@ def handle_client_request(client_sock):
         # Parse HTTP request
         request_lines = request_data.decode().split("\r\n")
         if not request_lines:
-            return
+            return False
 
         # Get request line (method, path, protocol)
         request_line = request_lines[0].split(" ")
@@ -334,12 +341,12 @@ def handle_client_request(client_sock):
                 "method": "POST",
                 "description": "Send POST request with JSON body containing ssid and password"
             })
-            return
+            return False
 
         # Only handle POST requests to /api/wifi for actual configuration
         if method != "POST" or path != "/api/wifi":
             send_response(client_sock, 404, {"status": "error", "message": "Not found"})
-            return
+            return False
 
         # Parse headers to find Content-Length
         content_length = 0
@@ -357,13 +364,13 @@ def handle_client_request(client_sock):
         # Parse JSON
         if json is None:
             send_response(client_sock, 500, {"status": "error", "message": "JSON not available"})
-            return
+            return False
 
         try:
             data = json.loads(body.decode())
         except Exception as e:
             send_response(client_sock, 400, {"status": "error", "message": f"Invalid JSON: {e}"})
-            return
+            return False
 
         # Validate required fields
         ssid = data.get("ssid")
@@ -371,7 +378,7 @@ def handle_client_request(client_sock):
 
         if not ssid or not password:
             send_response(client_sock, 400, {"status": "error", "message": "Missing ssid or password"})
-            return
+            return False
 
         print(f"Received WiFi credentials: SSID={ssid}")
 
@@ -382,8 +389,10 @@ def handle_client_request(client_sock):
                 "message": "WiFi credentials saved, attempting connection...",
                 "ssid": ssid
             })
+            return True  # Signal that new credentials were saved
         else:
             send_response(client_sock, 500, {"status": "error", "message": "Failed to save credentials"})
+            return False
 
     except Exception as e:
         print(f"Error handling request: {e}")
@@ -391,6 +400,7 @@ def handle_client_request(client_sock):
             send_response(client_sock, 500, {"status": "error", "message": str(e)})
         except:
             pass
+        return False
 
 
 def send_response(client_sock, status_code, response_data):
@@ -490,10 +500,9 @@ def main():
         # Run HTTP server to handle WiFi configuration requests
         # This will run until a valid WiFi config is received and connection succeeds
         while True:
-            start_http_server(ap)
-
-            # After HTTP server handles a request, try to connect with new credentials
-            new_ssid, new_password = load_wifi_credentials()
+            if start_http_server(ap):
+                # New credentials were received, try to connect
+                new_ssid, new_password = load_wifi_credentials()
 
             if new_ssid and new_password:
                 print(f"\nAttempting to connect to WiFi: {new_ssid}")
