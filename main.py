@@ -31,8 +31,9 @@ FIRMWARE_VERSION = "1.0.0"
 AP_SSID = "rpi_temp_XXXX"  # XXXX will be replaced with last 4 chars of device UID
 AP_PASSWORD = "First,Connect,Setup"
 AP_CHANNEL = 6
-# MicroPython uses network.AUTH_WPA2 for WPA2 authentication
-AP_AUTH_MODE = network.AUTH_WPA2
+# MicroPython WiFi auth modes: AUTH_OPEN=0, AUTH_WEP=1, AUTH_WPA=2, AUTH_WPA2=3, AUTH_WPA_WPA2=4
+# Using numeric value 4 for WPA/WPA2-PSK (most common)
+AP_AUTH_MODE = 4
 
 # Temperature monitoring interval (seconds)
 TEMP_INTERVAL = 60
