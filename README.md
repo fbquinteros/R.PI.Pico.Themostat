@@ -184,8 +184,13 @@ Your Pico W will now:
 
 ---
 
-## Next Steps
+## Getting Started
 
+**New to the project?** Start here:
+- **[QUICKSTART.md](QUICKSTART.md)** - Flash and update your Pico W in 15 minutes
+- **[FIRMWARE_GUIDE.md](FIRMWARE_GUIDE.md)** - Complete compilation and deployment guide
+
+**Advanced topics:**
 - Read [`IMPLEMENTATION_STEPS.md`](IMPLEMENTATION_STEPS.md) for detailed 8-phase guide
 - Review [`PipelineSetup.md`](PipelineSetup.md) for CI/CD configuration details
 - Customize `main.py` with your actual temperature monitoring code
