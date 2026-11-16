@@ -296,7 +296,7 @@ def start_http_server(ap_interface):
         # This is compatible with MicroPython's socket implementation
         sock = socket.socket()
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        sock.bind(("0.0.0.0", API_PORT))
+        sock.bind((ap_ip, API_PORT))
         sock.listen(5)
 
         print("HTTP server listening - send POST request to /api/wifi")
