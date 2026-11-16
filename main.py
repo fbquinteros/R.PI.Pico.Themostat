@@ -278,12 +278,11 @@ def start_http_server(ap_interface):
         ap_ip = ap_interface.ifconfig()[0]
         print(f"Starting HTTP server on {ap_ip}:{API_PORT}")
 
-        # Create socket - bind to specific interface instead of all interfaces
-        # This is more secure and ensures the server only listens on the AP interface
-        addr = socket.getaddrinfo(ap_ip, API_PORT)[0][-1]
+        # Create socket and bind to all interfaces (0.0.0.0) on the API port
+        # This is compatible with MicroPython's socket implementation
         sock = socket.socket()
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        sock.bind(addr)
+        sock.bind(("0.0.0.0", API_PORT))
         sock.listen(5)
 
         print("HTTP server listening - send POST request to /api/wifi")
@@ -325,7 +324,18 @@ def handle_client_request(client_sock):
 
         print(f"Request: {method} {path}")
 
-        # Only handle POST requests to /api/wifi
+        # Handle GET request to /api/wifi (health check from browser)
+        if method == "GET" and path == "/api/wifi":
+            send_response(client_sock, 200, {
+                "status": "ok",
+                "message": "WiFi configuration API is running",
+                "endpoint": "/api/wifi",
+                "method": "POST",
+                "description": "Send POST request with JSON body containing ssid and password"
+            })
+            return
+
+        # Only handle POST requests to /api/wifi for actual configuration
         if method != "POST" or path != "/api/wifi":
             send_response(client_sock, 404, {"status": "error", "message": "Not found"})
             return
