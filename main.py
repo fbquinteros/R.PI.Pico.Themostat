@@ -96,10 +96,11 @@ def save_wifi_credentials(ssid, password):
 
         # Save to file
         with open(CREDENTIALS_FILE, "w") as f:
-            json.dump(credentials, f)
+            f.write(json.dumps(credentials))
 
         print(f"WiFi credentials saved for SSID: {ssid}")
         return True
+    
     except Exception as e:
         print(f"Error saving credentials: {e}")
         return False
@@ -108,14 +109,16 @@ def save_wifi_credentials(ssid, password):
 def load_wifi_credentials():
     """Load WiFi credentials from persistent storage"""
     try:
-        if json is None or not uos.path.exists(CREDENTIALS_FILE):
+        if json is None or not uos.stat(CREDENTIALS_FILE):
             return None, None
 
-        with open(CREDENTIALS_FILE, "r") as f:
+        with open(CREDENTIALS_FILE, "r") as f:    
+            print("Loading credentials.")        
             credentials = json.load(f)
 
         print(f"Loaded WiFi credentials for SSID: {credentials.get('ssid')}")
         return credentials.get("ssid"), credentials.get("password")
+    
     except Exception as e:
         print(f"Error loading credentials: {e}")
         return None, None
@@ -126,7 +129,12 @@ def connect_to_wifi():
     wlan = network.WLAN(network.STA_IF)
     wlan.active(True)
 
-    if not wlan.isconnected():
+    WIFI_SSID, WIFI_PASSWORD = load_wifi_credentials()
+    
+    if (WIFI_SSID == None or WIFI_PASSWORD == None):
+        return False, None
+    
+    if not wlan.isconnected():        
         print(f"Connecting to WiFi: {WIFI_SSID}")
         wlan.connect(WIFI_SSID, WIFI_PASSWORD)
 
@@ -143,7 +151,9 @@ def connect_to_wifi():
 
         print("Failed to connect to WiFi. Starting Access Point mode...")
         return False, None
-
+    else:
+        print(f"Already connected to WiFi: {WIFI_SSID}")
+        print(f"IP Address: {wlan.ifconfig()}")
     return True, wlan
 
 
@@ -163,6 +173,7 @@ def setup_access_point():
     print(f"Please connect to this AP for initial setup")
     print(f"Then update config.py with your WiFi credentials")
     print(f"{'='*50}\n")
+
     try:    
         # Configure AP - MicroPython uses positional args or specific param names
         ap.config(ssid=unique_ssid, password=AP_PASSWORD, channel=AP_CHANNEL)
@@ -275,8 +286,7 @@ def apply_update():
 
 
 def start_http_server(ap_interface):
-    """Start HTTP server on AP interface for WiFi configuration.
-    Returns True if new credentials were received and saved, False otherwise."""
+    """Start HTTP server on AP interface for WiFi configuration"""
     try:
         # Get AP IP address (typically 192.168.4.1)
         ap_ip = ap_interface.ifconfig()[0]
@@ -290,29 +300,23 @@ def start_http_server(ap_interface):
         sock.listen(5)
 
         print("HTTP server listening - send POST request to /api/wifi")
-
-        while True:
+        continue_loop = True
+        while continue_loop:
             try:
                 client_sock, client_addr = sock.accept()
                 print(f"Client connected from {client_addr}")
-                credentials_received = handle_client_request(client_sock)
+                continue_loop = handle_client_request(client_sock)
                 client_sock.close()
-
-                if credentials_received:
-                    return True  # Exit loop to signal new credentials available
-
             except Exception as e:
                 print(f"Error handling client: {e}")
                 continue
 
     except Exception as e:
         print(f"HTTP server error: {e}")
-    return False
 
 
 def handle_client_request(client_sock):
-    """Handle incoming HTTP request for WiFi configuration.
-    Returns True if new credentials were saved, False otherwise."""
+    """Handle incoming HTTP request for WiFi configuration"""
     try:
         # Read the request
         request_data = b""
@@ -325,7 +329,7 @@ def handle_client_request(client_sock):
         # Parse HTTP request
         request_lines = request_data.decode().split("\r\n")
         if not request_lines:
-            return False
+            return
 
         # Get request line (method, path, protocol)
         request_line = request_lines[0].split(" ")
@@ -343,12 +347,12 @@ def handle_client_request(client_sock):
                 "method": "POST",
                 "description": "Send POST request with JSON body containing ssid and password"
             })
-            return False
+            return
 
         # Only handle POST requests to /api/wifi for actual configuration
         if method != "POST" or path != "/api/wifi":
             send_response(client_sock, 404, {"status": "error", "message": "Not found"})
-            return False
+            return
 
         # Parse headers to find Content-Length
         content_length = 0
@@ -366,13 +370,13 @@ def handle_client_request(client_sock):
         # Parse JSON
         if json is None:
             send_response(client_sock, 500, {"status": "error", "message": "JSON not available"})
-            return False
+            return
 
         try:
             data = json.loads(body.decode())
         except Exception as e:
             send_response(client_sock, 400, {"status": "error", "message": f"Invalid JSON: {e}"})
-            return False
+            return
 
         # Validate required fields
         ssid = data.get("ssid")
@@ -380,7 +384,7 @@ def handle_client_request(client_sock):
 
         if not ssid or not password:
             send_response(client_sock, 400, {"status": "error", "message": "Missing ssid or password"})
-            return False
+            return
 
         print(f"Received WiFi credentials: SSID={ssid}")
 
@@ -391,10 +395,10 @@ def handle_client_request(client_sock):
                 "message": "WiFi credentials saved, attempting connection...",
                 "ssid": ssid
             })
-            return True  # Signal that new credentials were saved
+            print("Returning false")
+            return False
         else:
             send_response(client_sock, 500, {"status": "error", "message": "Failed to save credentials"})
-            return False
 
     except Exception as e:
         print(f"Error handling request: {e}")
@@ -402,7 +406,6 @@ def handle_client_request(client_sock):
             send_response(client_sock, 500, {"status": "error", "message": str(e)})
         except:
             pass
-        return False
 
 
 def send_response(client_sock, status_code, response_data):
@@ -452,18 +455,10 @@ def run_temperature_monitor():
 def main():
     """Main entry point"""
     print(f"Firmware version: {FIRMWARE_VERSION}")
-
-    # First, try to load saved WiFi credentials from persistent storage
-    saved_ssid, saved_password = load_wifi_credentials()
-
-    if saved_ssid and saved_password:
-        # Use saved credentials instead of config.py defaults
-        print("Using saved WiFi credentials")
-        WIFI_SSID = saved_ssid
-        WIFI_PASSWORD = saved_password
-        
+    
     # Try to connect to WiFi or setup AP
     connection_type, wlan = connect_to_wifi_or_ap()
+
     if connection_type == "sta":
         # WiFi connected - check for updates and run normal operation
         print("Connected to WiFi network")
@@ -501,9 +496,10 @@ def main():
         # Run HTTP server to handle WiFi configuration requests
         # This will run until a valid WiFi config is received and connection succeeds
         while True:
-            if start_http_server(ap):
-                # New credentials were received, try to connect
-                new_ssid, new_password = load_wifi_credentials()
+            start_http_server(ap)
+
+            # After HTTP server handles a request, try to connect with new credentials
+            new_ssid, new_password = load_wifi_credentials()
 
             if new_ssid and new_password:
                 print(f"\nAttempting to connect to WiFi: {new_ssid}")
