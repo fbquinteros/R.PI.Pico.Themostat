@@ -11,22 +11,6 @@ import sys
 import machine
 import socket
 
-# Import configuration from config.py (contains sensitive information)
-from config import (
-    WIFI_SSID,
-    WIFI_PASSWORD,
-    UPDATE_SERVER_URL,
-    FIRMWARE_VERSION,
-    AP_SSID,
-    AP_PASSWORD,
-    AP_CHANNEL,
-    AP_AUTH_MODE,
-    TEMP_INTERVAL,
-    API_PORT,
-    API_TIMEOUT,
-    CREDENTIALS_FILE
-)
-
 # Try to import ujson for JSON parsing (available in MicroPython)
 try:
     import ujson as json
@@ -35,6 +19,51 @@ except ImportError:
         import json
     except ImportError:
         json = None
+
+# Configuration settings - defaults that can be overridden by config.py
+# These are the fallback values if config.py is not available
+WIFI_SSID = "your_wifi_ssid"
+WIFI_PASSWORD = "your_wifi_password"
+UPDATE_SERVER_URL = "http://your-server-ip:8080/update"
+FIRMWARE_VERSION = "1.0.0"
+
+# AP fallback configuration (used when WiFi connection fails)
+AP_SSID = "rpi_temp_XXXX"  # XXXX will be replaced with last 4 chars of device UID
+AP_PASSWORD = "First,Connect,Setup"
+AP_CHANNEL = 6
+AP_AUTH_MODE = network.AUTH_WPA_WPA2_PSK
+
+# Temperature monitoring interval (seconds)
+TEMP_INTERVAL = 60
+
+# API configuration for WiFi setup in AP mode
+API_PORT = 80
+API_TIMEOUT = 30
+CREDENTIALS_FILE = "wifi_config.json"
+
+# Try to load configuration from config.py if it exists
+try:
+    # Import each setting individually with fallback to defaults
+    import config
+
+    # Override defaults with values from config.py if available
+    WIFI_SSID = getattr(config, 'WIFI_SSID', WIFI_SSID)
+    WIFI_PASSWORD = getattr(config, 'WIFI_PASSWORD', WIFI_PASSWORD)
+    UPDATE_SERVER_URL = getattr(config, 'UPDATE_SERVER_URL', UPDATE_SERVER_URL)
+    FIRMWARE_VERSION = getattr(config, 'FIRMWARE_VERSION', FIRMWARE_VERSION)
+    AP_PASSWORD = getattr(config, 'AP_PASSWORD', AP_PASSWORD)
+    AP_CHANNEL = getattr(config, 'AP_CHANNEL', AP_CHANNEL)
+    TEMP_INTERVAL = getattr(config, 'TEMP_INTERVAL', TEMP_INTERVAL)
+    API_PORT = getattr(config, 'API_PORT', API_PORT)
+    API_TIMEOUT = getattr(config, 'API_TIMEOUT', API_TIMEOUT)
+    CREDENTIALS_FILE = getattr(config, 'CREDENTIALS_FILE', CREDENTIALS_FILE)
+
+    print("Loaded configuration from config.py")
+except ImportError:
+    print("config.py not found - using default settings")
+except Exception as e:
+    print(f"Error loading config.py: {e}")
+    print("Using default settings")
 
 
 def get_device_uid():
