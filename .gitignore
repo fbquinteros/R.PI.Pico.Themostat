@@ -1,0 +1,77 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+venv/
+ENV/
+env/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Private keys - NEVER COMMIT THESE!
+*.key
+*.pem
+signing.key
+ca.key
+server.key
+pico1.key
+pico2.key
+
+# Certificates (optional - commit .crt files, not .key files)
+# Uncomment if you want to keep certs out of git:
+# *.crt
+# ca.srl
+
+# Test coverage
+.coverage
+htmlcov/
+.pytest_cache/
+
+# Local configuration
+.env
+config.local.py
+
+# Firmware builds
+firmware/*.bin
+firmware/*.uf2
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
