@@ -246,8 +246,9 @@ def start_http_server(ap_interface):
         ap_ip = ap_interface.ifconfig()[0]
         print(f"Starting HTTP server on {ap_ip}:{API_PORT}")
 
-        # Create socket
-        addr = socket.getaddrinfo("0.0.0.0", API_PORT)[0][-1]
+        # Create socket - bind to specific interface instead of all interfaces
+        # This is more secure and ensures the server only listens on the AP interface
+        addr = socket.getaddrinfo(ap_ip, API_PORT)[0][-1]
         sock = socket.socket()
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         sock.bind(addr)
