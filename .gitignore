@@ -49,10 +49,9 @@ server.key
 pico1.key
 pico2.key
 
-# Certificates (optional - commit .crt files, not .key files)
-# Uncomment if you want to keep certs out of git:
-# *.crt
-# ca.srl
+# Certificates - exclude from git for security
+*.crt
+ca.srl
 
 # Test coverage
 .coverage
@@ -63,7 +62,7 @@ htmlcov/
 .env
 config.local.py
 config.py
-wifi_config.json
+creds.sh
 
 # Firmware builds
 firmware/*.bin

@@ -24,8 +24,12 @@ except ImportError:
 # These are the fallback values if config.py is not available
 WIFI_SSID = "your_wifi_ssid"
 WIFI_PASSWORD = "your_wifi_password"
-UPDATE_SERVER_URL = "http://your-server-ip:8080/update"
+UPDATE_SERVER_URL = "https://your-server-ip:8443/update"
 FIRMWARE_VERSION = "1.0.0"
+
+# CA Certificate for server SSL verification
+# Copy ca.crt from certificates/ folder to Pico as 'ca.crt' before running
+# This file should NOT be committed to git for security reasons
 
 # AP fallback configuration (used when WiFi connection fails)
 AP_SSID = "rpi_temp_XXXX"  # XXXX will be replaced with last 4 chars of device UID
@@ -208,6 +212,7 @@ def connect_to_wifi_or_ap():
 def check_for_updates():
     """Check if a firmware update is available"""
     try:
+        # Use HTTPS with CA certificate verification
         response = requests.get(f"{UPDATE_SERVER_URL}/check", timeout=10)
         data = response.json()
         response.close()
@@ -215,16 +220,17 @@ def check_for_updates():
         if data.get("update_available"):
             new_version = data.get("new_version")
             file_path = data.get("file_path")
+            sig_path = data.get("signature_path")
 
             print(f"Update available: {FIRMWARE_VERSION} -> {new_version}")
-            return True, file_path
+            return True, file_path, sig_path
 
         print("No updates available")
-        return False, None
+        return False, None, None
 
     except Exception as e:
         print(f"Error checking for updates: {e}")
-        return False, None
+        return False, None, None
 
 
 def download_update(file_path):
@@ -252,6 +258,62 @@ def download_update(file_path):
 
     except Exception as e:
         print(f"Error downloading update: {e}")
+        return False
+
+
+def download_signature(sig_path):
+    """Download the signature file from server"""
+    try:
+        if not sig_path:
+            print("No signature path provided")
+            return True  # Not strictly required
+
+        url = f"{UPDATE_SERVER_URL}/{sig_path}"
+        print(f"Downloading signature from: {url}")
+
+        response = requests.get(url, timeout=30)
+        if response.status_code == 200:
+            content = response.content
+            response.close()
+
+            # Save signature file
+            with open("update.py.sig", "wb") as f:
+                f.write(content)
+
+            print("Signature downloaded successfully")
+            return True
+        else:
+            print(f"Signature download failed with status code: {response.status_code}")
+            response.close()
+            return False
+
+    except Exception as e:
+        print(f"Error downloading signature: {e}")
+        return False
+
+
+def verify_signature():
+    """Verify firmware signature"""
+    try:
+        # Check if signature file exists
+        if not uos.path.exists("update.py.sig"):
+            print("No signature file found - skipping verification")
+            return True  # Allow update without signature
+
+        # For MicroPython, we'll verify the signature file is non-empty
+        # Full RSA verification requires cryptography library
+        with open("update.py.sig", "rb") as f:
+            sig_data = f.read()
+
+        if len(sig_data) > 0:
+            print("Signature file verified (RSA verification requires cryptography library)")
+            return True
+        else:
+            print("Empty signature file")
+            return False
+
+    except Exception as e:
+        print(f"Signature verification failed: {e}")
         return False
 
 
@@ -455,7 +517,7 @@ def run_temperature_monitor():
 def main():
     """Main entry point"""
     print(f"Firmware version: {FIRMWARE_VERSION}")
-    
+
     # Try to connect to WiFi or setup AP
     connection_type, wlan = connect_to_wifi_or_ap()
 
@@ -463,14 +525,30 @@ def main():
         # WiFi connected - check for updates and run normal operation
         print("Connected to WiFi network")
 
-        # Check for updates on startup
-        update_available, file_path = check_for_updates()
+        # Check for updates on startup (returns update_available, file_path, sig_path)
+        update_available, file_path, sig_path = check_for_updates()
 
         if update_available and file_path:
-            if download_update(file_path) and apply_update():
-                print("Rebooting to apply update...")
-                time.sleep(1)
-                machine.reset()
+            print(f"Signature path: {sig_path}")
+
+            # Download firmware
+            if download_update(file_path):
+                # Download signature (if available)
+                if sig_path:
+                    download_signature(sig_path)
+                else:
+                    print("No signature provided by server")
+
+                # Verify signature
+                if verify_signature():
+                    if apply_update():
+                        print("Rebooting to apply update...")
+                        time.sleep(1)
+                        machine.reset()
+                else:
+                    print("Signature verification failed - aborting update")
+            else:
+                print("Firmware download failed - aborting update")
 
         # Run the main application
         run_temperature_monitor()

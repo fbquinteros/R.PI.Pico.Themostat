@@ -9,6 +9,8 @@ import socketserver
 import json
 import os
 import base64
+import sys
+import argparse
 from urllib.parse import urlparse, parse_qs
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
@@ -107,6 +109,23 @@ class SecureUpdateHandler(http.server.BaseHTTPRequestHandler):
 
         return False
 
+    def get_ca_public_key_fingerprint(self):
+        """Get SHA256 fingerprint of CA public key"""
+        try:
+            ca_cert_path = os.path.join(os.path.dirname(__file__), "..", "certificates", "ca.crt")
+            with open(ca_cert_path, "rb") as f:
+                ca_cert = load_pem_x509_certificate(f.read(), default_backend())
+            public_key_bytes = ca_cert.public_key().public_bytes(
+                encoding=serialization.Encoding.DER,
+                format=serialization.PublicFormat.SubjectPublicKeyInfo
+            )
+            fingerprint = hashes.Hash(hashes.SHA256(), backend=default_backend())
+            fingerprint.update(public_key_bytes)
+            return "sha256:" + base64.b64encode(fingerprint.finalize()).decode()
+        except Exception as e:
+            print(f"Error getting CA fingerprint: {e}")
+            return None
+
     def send_json_response(self, data, status=200):
         """Send a JSON response"""
         self.send_response(status)
@@ -176,11 +195,17 @@ class SecureUpdateHandler(http.server.BaseHTTPRequestHandler):
             # Check if update is needed
             update_available = current_version != latest_version
 
+            # Get signature path and CA fingerprint
+            sig_path = "firmware.bin.sig" if update_available else None
+            ca_fingerprint = self.get_ca_public_key_fingerprint()
+
             response_data = {
                 "update_available": update_available,
                 "current_version": current_version,
                 "new_version": latest_version,
                 "file_path": "firmware.bin" if update_available else None,
+                "signature_path": sig_path,
+                "public_key_fingerprint": ca_fingerprint,
                 "device": device_name
             }
 
@@ -194,8 +219,8 @@ class SecureUpdateHandler(http.server.BaseHTTPRequestHandler):
         try:
             filename = os.path.basename(path.lstrip("/"))
 
-            # Only allow specific files
-            allowed_files = ["firmware.bin", "update.py", "update.py.sig"]
+            # Only allow specific files (firmware and signatures)
+            allowed_files = ["firmware.bin", "update.py", "firmware.bin.sig", "update.py.sig"]
             if filename not in allowed_files:
                 self.send_error(403, "Access Denied")
                 return
@@ -242,11 +267,62 @@ class SecureUpdateHandler(http.server.BaseHTTPRequestHandler):
             deploy_dir = os.path.join(FIRMWARE_DIR, version)
             os.makedirs(deploy_dir, exist_ok=True)
 
+            # Update VERSION file in firmware directory
+            version_path = os.path.join(FIRMWARE_DIR, "VERSION")
+            with open(version_path, "w") as f:
+                f.write(version)
+
             print(f"Deployment received for version: {version}")
             self.send_json_response({"status": "received", "version": version})
 
         except Exception as e:
             self.send_error(500, str(e))
+
+
+def sign_firmware():
+    """Sign firmware.bin with CA private key"""
+    try:
+        ca_key_path = os.path.join(os.path.dirname(__file__), "..", "certificates", "ca.key")
+        firmware_path = os.path.join(FIRMWARE_DIR, "firmware.bin")
+        signature_path = os.path.join(FIRMWARE_DIR, "firmware.bin.sig")
+
+        if not os.path.exists(firmware_path):
+            print("Firmware file not found - nothing to sign")
+            return False
+
+        if not os.path.exists(ca_key_path):
+            print("CA private key not found - cannot sign firmware")
+            return False
+
+        # Read firmware
+        with open(firmware_path, "rb") as f:
+            firmware_data = f.read()
+
+        # Read CA private key
+        with open(ca_key_path, "rb") as f:
+            ca_key = serialization.load_pem_private_key(
+                f.read(),
+                password=None,
+                backend=default_backend()
+            )
+
+        # Sign firmware using RSA-PKCS1v15 with SHA256
+        signature = ca_key.sign(
+            firmware_data,
+            padding.PKCS1v15(),
+            hashes.SHA256()
+        )
+
+        # Save signature
+        with open(signature_path, "wb") as f:
+            f.write(signature)
+
+        print(f"Firmware signed successfully: {signature_path}")
+        return True
+
+    except Exception as e:
+        print(f"Error signing firmware: {e}")
+        return False
 
 
 def load_client_cert():
@@ -259,8 +335,18 @@ def load_client_cert():
     return certs
 
 
+def parse_args():
+    """Parse command-line arguments"""
+    parser = argparse.ArgumentParser(description="Secure OTA Update Server")
+    parser.add_argument("--sign", action="store_true", help="Sign firmware before starting server")
+    parser.add_argument("--port", type=int, default=PORT, help=f"Server port (default: {PORT})")
+    return parser.parse_args()
+
+
 def main():
     """Start the secure update server"""
+    args = parse_args()
+
     # Create firmware directory if it doesn't exist
     os.makedirs(FIRMWARE_DIR, exist_ok=True)
 
@@ -270,7 +356,15 @@ def main():
         with open(version_path, "w") as f:
             f.write("1.0.0")
 
-    print(f"Secure OTA Update Server starting on port {PORT}")
+    # Optionally sign firmware on startup
+    if args.sign:
+        print("Signing firmware...")
+        if sign_firmware():
+            print("Firmware signed successfully")
+        else:
+            print("Warning: Firmware signing failed, continuing without signature")
+
+    print(f"Secure OTA Update Server starting on port {args.port}")
     print(f"Firmware directory: {FIRMWARE_DIR}")
     print(f"CA Certificate: {CA_CERT_FILE}")
     print(f"Server Certificate: {SERVER_CERT_FILE}")
@@ -287,10 +381,10 @@ def main():
     available_certs = load_client_cert()
     print(f"Available device certificates: {available_certs}")
 
-    with socketserver.TCPServer(("", PORT), SecureUpdateHandler) as httpd:
+    with socketserver.TCPServer(("", args.port), SecureUpdateHandler) as httpd:
         # Wrap the socket in SSL
         httpd.socket = context.wrap_socket(httpd.socket, server_side=True)
-        print(f"Secure server running at https://localhost:{PORT}")
+        print(f"Secure server running at https://localhost:{args.port}")
         print("Client certificate authentication enabled")
 
         try:
