@@ -62,6 +62,7 @@ htmlcov/
 # Local configuration
 .env
 config.local.py
+config.py
 
 # Firmware builds
 firmware/*.bin
