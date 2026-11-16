@@ -9,7 +9,7 @@ import urequests as requests
 import uos
 import sys
 import machine
-import uuid
+import socket
 
 # Import configuration from config.py (contains sensitive information)
 from config import (
@@ -21,8 +21,20 @@ from config import (
     AP_PASSWORD,
     AP_CHANNEL,
     AP_AUTH_MODE,
-    TEMP_INTERVAL
+    TEMP_INTERVAL,
+    API_PORT,
+    API_TIMEOUT,
+    CREDENTIALS_FILE
 )
+
+# Try to import ujson for JSON parsing (available in MicroPython)
+try:
+    import ujson as json
+except ImportError:
+    try:
+        import json
+    except ImportError:
+        json = None
 
 
 def get_device_uid():
@@ -38,6 +50,43 @@ def get_device_uid():
         wlan = network.WLAN(network.STA_IF)
         mac = wlan.config("mac")
         return f"{mac[5]:02x}{mac[4]:02x}"
+
+
+def save_wifi_credentials(ssid, password):
+    """Save WiFi credentials to persistent storage"""
+    try:
+        if json is None:
+            print("Error: JSON module not available")
+            return False
+
+        # Create credentials dictionary
+        credentials = {"ssid": ssid, "password": password}
+
+        # Save to file
+        with open(CREDENTIALS_FILE, "w") as f:
+            json.dump(credentials, f)
+
+        print(f"WiFi credentials saved for SSID: {ssid}")
+        return True
+    except Exception as e:
+        print(f"Error saving credentials: {e}")
+        return False
+
+
+def load_wifi_credentials():
+    """Load WiFi credentials from persistent storage"""
+    try:
+        if json is None or not uos.path.exists(CREDENTIALS_FILE):
+            return None, None
+
+        with open(CREDENTIALS_FILE, "r") as f:
+            credentials = json.load(f)
+
+        print(f"Loaded WiFi credentials for SSID: {credentials.get('ssid')}")
+        return credentials.get("ssid"), credentials.get("password")
+    except Exception as e:
+        print(f"Error loading credentials: {e}")
+        return None, None
 
 
 def connect_to_wifi():
@@ -190,6 +239,148 @@ def apply_update():
         return False
 
 
+def start_http_server(ap_interface):
+    """Start HTTP server on AP interface for WiFi configuration"""
+    try:
+        # Get AP IP address (typically 192.168.4.1)
+        ap_ip = ap_interface.ifconfig()[0]
+        print(f"Starting HTTP server on {ap_ip}:{API_PORT}")
+
+        # Create socket
+        addr = socket.getaddrinfo("0.0.0.0", API_PORT)[0][-1]
+        sock = socket.socket()
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.bind(addr)
+        sock.listen(5)
+
+        print("HTTP server listening - send POST request to /api/wifi")
+
+        while True:
+            try:
+                client_sock, client_addr = sock.accept()
+                print(f"Client connected from {client_addr}")
+                handle_client_request(client_sock)
+                client_sock.close()
+            except Exception as e:
+                print(f"Error handling client: {e}")
+                continue
+
+    except Exception as e:
+        print(f"HTTP server error: {e}")
+
+
+def handle_client_request(client_sock):
+    """Handle incoming HTTP request for WiFi configuration"""
+    try:
+        # Read the request
+        request_data = b""
+        while b"\r\n\r\n" not in request_data:
+            chunk = client_sock.recv(1024)
+            if not chunk:
+                break
+            request_data += chunk
+
+        # Parse HTTP request
+        request_lines = request_data.decode().split("\r\n")
+        if not request_lines:
+            return
+
+        # Get request line (method, path, protocol)
+        request_line = request_lines[0].split(" ")
+        method = request_line[0] if len(request_line) > 0 else ""
+        path = request_line[1] if len(request_line) > 1 else ""
+
+        print(f"Request: {method} {path}")
+
+        # Only handle POST requests to /api/wifi
+        if method != "POST" or path != "/api/wifi":
+            send_response(client_sock, 404, {"status": "error", "message": "Not found"})
+            return
+
+        # Parse headers to find Content-Length
+        content_length = 0
+        for header in request_lines[1:]:
+            if header.lower().startswith("content-length:"):
+                content_length = int(header.split(":")[1].strip())
+                break
+
+        # Get request body
+        body_start = request_data.find(b"\r\n\r\n") + 4
+        body = request_data[body_start:body_start + content_length]
+
+        print(f"Request body: {body.decode()}")
+
+        # Parse JSON
+        if json is None:
+            send_response(client_sock, 500, {"status": "error", "message": "JSON not available"})
+            return
+
+        try:
+            data = json.loads(body.decode())
+        except Exception as e:
+            send_response(client_sock, 400, {"status": "error", "message": f"Invalid JSON: {e}"})
+            return
+
+        # Validate required fields
+        ssid = data.get("ssid")
+        password = data.get("password")
+
+        if not ssid or not password:
+            send_response(client_sock, 400, {"status": "error", "message": "Missing ssid or password"})
+            return
+
+        print(f"Received WiFi credentials: SSID={ssid}")
+
+        # Save credentials
+        if save_wifi_credentials(ssid, password):
+            send_response(client_sock, 200, {
+                "status": "success",
+                "message": "WiFi credentials saved, attempting connection...",
+                "ssid": ssid
+            })
+        else:
+            send_response(client_sock, 500, {"status": "error", "message": "Failed to save credentials"})
+
+    except Exception as e:
+        print(f"Error handling request: {e}")
+        try:
+            send_response(client_sock, 500, {"status": "error", "message": str(e)})
+        except:
+            pass
+
+
+def send_response(client_sock, status_code, response_data):
+    """Send HTTP response to client"""
+    try:
+        # Map status codes to messages
+        status_messages = {
+            200: "OK",
+            400: "Bad Request",
+            404: "Not Found",
+            500: "Internal Server Error"
+        }
+
+        status_msg = status_messages.get(status_code, "Unknown")
+
+        # Build JSON response
+        if json is not None:
+            body = json.dumps(response_data)
+        else:
+            body = str(response_data)
+
+        # Build HTTP response
+        response = f"HTTP/1.1 {status_code} {status_msg}\r\n"
+        response += "Content-Type: application/json\r\n"
+        response += f"Content-Length: {len(body)}\r\n"
+        response += "Connection: close\r\n\r\n"
+        response += body
+
+        client_sock.send(response.encode())
+        print(f"Sent response: {status_code} {status_msg}")
+    except Exception as e:
+        print(f"Error sending response: {e}")
+
+
 def run_temperature_monitor():
     """Main temperature monitoring loop"""
     print("Starting temperature monitoring...")
@@ -206,11 +397,22 @@ def main():
     """Main entry point"""
     print(f"Firmware version: {FIRMWARE_VERSION}")
 
+    # First, try to load saved WiFi credentials from persistent storage
+    saved_ssid, saved_password = load_wifi_credentials()
+
+    if saved_ssid and saved_password:
+        # Use saved credentials instead of config.py defaults
+        print("Using saved WiFi credentials")
+        WIFI_SSID = saved_ssid
+        WIFI_PASSWORD = saved_password
+
     # Try to connect to WiFi or setup AP
     connection_type, wlan = connect_to_wifi_or_ap()
 
     if connection_type == "sta":
         # WiFi connected - check for updates and run normal operation
+        print("Connected to WiFi network")
+
         # Check for updates on startup
         update_available, file_path = check_for_updates()
 
@@ -225,12 +427,64 @@ def main():
 
     else:
         # AP mode - device is waiting for setup
-        print("\nDevice is in setup mode. Connect to the AP and update config.py.")
-        print("After updating config, reset the device to connect to your WiFi.\n")
+        print("\n" + "=" * 50)
+        print("WiFi connection failed. Starting Access Point mode...")
+        print("=" * 50)
 
-        # Keep AP running indefinitely in setup mode
+        # Setup AP interface
+        ap = setup_access_point()
+
+        # Start HTTP server to receive WiFi configuration
+        print("\nHTTP server started for WiFi configuration")
+        print("Connect to the AP and send POST request to /api/wifi")
+        print("\nExample curl command:")
+        print('curl -X POST http://192.168.4.1/api/wifi \\')
+        print('  -H "Content-Type: application/json" \\')
+        print('  -d \'{"ssid":"YOUR_SSID","password":"YOUR_PASSWORD"}\'')
+        print("\n" + "=" * 50)
+
+        # Run HTTP server to handle WiFi configuration requests
+        # This will run until a valid WiFi config is received and connection succeeds
         while True:
-            time.sleep(60)
+            start_http_server(ap)
+
+            # After HTTP server handles a request, try to connect with new credentials
+            new_ssid, new_password = load_wifi_credentials()
+
+            if new_ssid and new_password:
+                print(f"\nAttempting to connect to WiFi: {new_ssid}")
+
+                # Stop AP and try to connect
+                ap.active(False)
+
+                # Create STA interface and connect
+                sta_if = network.WLAN(network.STA_IF)
+                sta_if.active(True)
+                sta_if.connect(new_ssid, new_password)
+
+                # Wait for connection
+                max_wait = 30
+                connected = False
+                while max_wait > 0:
+                    if sta_if.isconnected():
+                        print(f"Successfully connected to WiFi!")
+                        print(f"IP Address: {sta_if.ifconfig()}")
+                        connected = True
+                        break
+
+                    time.sleep(1)
+                    max_wait -= 1
+
+                if connected:
+                    # Reboot to continue with normal operation
+                    print("\nRebooting to join WiFi network...")
+                    time.sleep(2)
+                    machine.reset()
+                else:
+                    print("Failed to connect. Restarting HTTP server...")
+                    ap.active(True)
+
+            time.sleep(1)
 
 
 if __name__ == "__main__":
