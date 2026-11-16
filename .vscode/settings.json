@@ -2,7 +2,9 @@
     "python.languageServer": "Pylance",
     "python.analysis.typeCheckingMode": "basic",
     "python.analysis.diagnosticSeverityOverrides": {
-        "reportMissingModuleSource": "none"
+        "reportMissingModuleSource": "none",
+        "reportAttributeAccessIssue": "none",
+        "reportMissingImports": "none"
     },
     "python.terminal.activateEnvironment": false,
     "micropico.openOnStart": true,
