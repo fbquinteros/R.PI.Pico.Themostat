@@ -163,10 +163,12 @@ def setup_access_point():
     print(f"Please connect to this AP for initial setup")
     print(f"Then update config.py with your WiFi credentials")
     print(f"{'='*50}\n")
-
-    # Configure AP - MicroPython uses positional args or specific param names
-    ap.config(ssid=unique_ssid, password=AP_PASSWORD, channel=AP_CHANNEL)
-    ap.config(authmode=AP_AUTH_MODE)
+    try:    
+        # Configure AP - MicroPython uses positional args or specific param names
+        ap.config(ssid=unique_ssid, password=AP_PASSWORD, channel=AP_CHANNEL)
+        ap.config(authmode=AP_AUTH_MODE)
+    except Exception as e:
+        print(f"An error occurred: {e}")
 
     # Wait for clients to connect
     time.sleep(2)
@@ -459,10 +461,9 @@ def main():
         print("Using saved WiFi credentials")
         WIFI_SSID = saved_ssid
         WIFI_PASSWORD = saved_password
-
+        
     # Try to connect to WiFi or setup AP
     connection_type, wlan = connect_to_wifi_or_ap()
-
     if connection_type == "sta":
         # WiFi connected - check for updates and run normal operation
         print("Connected to WiFi network")
