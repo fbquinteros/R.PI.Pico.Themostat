@@ -31,7 +31,8 @@ FIRMWARE_VERSION = "1.0.0"
 AP_SSID = "rpi_temp_XXXX"  # XXXX will be replaced with last 4 chars of device UID
 AP_PASSWORD = "First,Connect,Setup"
 AP_CHANNEL = 6
-AP_AUTH_MODE = network.AUTH_WPA_WPA2_PSK
+# MicroPython uses network.AUTH_WPA2 for WPA2 authentication
+AP_AUTH_MODE = network.AUTH_WPA2
 
 # Temperature monitoring interval (seconds)
 TEMP_INTERVAL = 60
@@ -54,6 +55,7 @@ try:
     AP_PASSWORD = getattr(config, 'AP_PASSWORD', AP_PASSWORD)
     AP_CHANNEL = getattr(config, 'AP_CHANNEL', AP_CHANNEL)
     TEMP_INTERVAL = getattr(config, 'TEMP_INTERVAL', TEMP_INTERVAL)
+    # Note: AP_AUTH_MODE is not loaded from config.py as it's defined in main.py
     API_PORT = getattr(config, 'API_PORT', API_PORT)
     API_TIMEOUT = getattr(config, 'API_TIMEOUT', API_TIMEOUT)
     CREDENTIALS_FILE = getattr(config, 'CREDENTIALS_FILE', CREDENTIALS_FILE)
